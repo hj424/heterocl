@@ -58,6 +58,16 @@ void CodeGenFORFIRRTL::AddFunction(LoweredFunc f,
   LOG(INFO) << stream.str();
   LOG(INFO) << f->body;
   this->PrintStmt(f->body);
+  
+  this->PrintIndent();
+  stream << ";;======= interface =======\n";
+  //input clock
+  this->PrintIndent();
+  stream << "input clk : Clock\n";
+  // input reset 
+  this->PrintIndent();
+  stream << "input reset: UInt<1>";
+  stream << "\n";
 
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
@@ -88,10 +98,9 @@ void CodeGenFORFIRRTL::AddFunction(LoweredFunc f,
     }
 
   }
-  //input clock
-  this->PrintIndent();
-  stream << "input clk : Clock\n";
+
   stream << "\n";
+  // move this piece of code to for loop
   this->PrintIndent();
   stream << ";;reset\n";
   this->PrintIndent();
@@ -397,7 +406,7 @@ inline void PrintBinaryIntrinsitc(const Call* op,
 void CodeGenFORFIRRTL::VisitStmt_(const Store* op) {
   stream_body << "\n";
   this->PrintIndent_body();
-  stream_body << ";;store\n";
+  stream_body << ";;======= local vars =======\n";
   LOG(INFO) << "checkpoint VisitStmt_ Store";
   Type t = op->value.type();
   if (t.lanes() == 1) {
