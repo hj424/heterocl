@@ -101,6 +101,7 @@ void CodeGenFORFIRRTL::AddFunction(LoweredFunc f,
 
   stream << "\n";
   // move this piece of code to for loop
+  
   this->PrintIndent();
   stream << ";;reset\n";
   this->PrintIndent();
@@ -113,6 +114,7 @@ void CodeGenFORFIRRTL::AddFunction(LoweredFunc f,
   stream << "reset <= neq(reset_1,UInt(1))\n" << "\n";
   this -> PrintIndent();
   stream << stream_body.str();
+  
   //deal with the final connections of registers
   this->EndScope(module_scope);
   this->EndScope_body(module_scope_r);
@@ -285,28 +287,35 @@ std::string CodeGenFORFIRRTL::GetWire(
   auto reg_init = wire_f_list.find(v);
   std::string wire_reg = wire_reg_auto->second;
   if ( in_for == true && reg_init == wire_f_list.end() ){//first store in For. there was a store before For wire_reg.compare("_r") != 0){
+    // !!!here
     this -> PrintIndent_body();
     os << "reg " << vid << "_r : ";
     this -> PrintType(t,os);
     os << ", clk\n";
-    this -> PrintIndent_body();
-    os << "wire " << vid << "_f : ";
-    this -> PrintType(t,os);
+    //this -> PrintIndent_body();
+    //os << "wire " << vid << "_f : ";
+    //this -> PrintType(t,os);
     os << "\n";
     this -> PrintIndent_body();
-    os << vid << "_r <= mux(reset, "; 
+    os << "when n1 : \n";
+    this -> PrintIndent_body();
+    this -> PrintIndent_body();
+    os << vid << "_r <=  add(";
     os << vid << "_" << wire_reg <<", ";
     os << vid << "_f)\n";
     this -> PrintIndent_body();
-    os << vid << " <= " << vid << "_f\n";
+    
     //, initialize reg with reset and connect to rightside
     // reg out_r: UInt<32>, clk ;;initialize reg for every variable and input/output port in its FIRST Store. -> Hashmap reg_set[out_r] = 1
     //
+    
     wire << vid << "_r";
     wire_f_list[v] = wire_reg;
     vid_wire_reg[v] = "r";
+    
   }
   else{
+    
     int new_wire_num;
     if ( wire_reg.compare("r") == 0 ){ //the last wire was connected to the register
       new_wire_num = std::stoi(wire_f_list[v]) + 1;
@@ -316,6 +325,7 @@ std::string CodeGenFORFIRRTL::GetWire(
     wire << "_" << std::to_string(new_wire_num);
     vid_wire_reg[v] = std::to_string(new_wire_num);
     if(reg_init != wire_f_list.end()) wire_f_list[v] = std::to_string(new_wire_num);
+    
   }
   return wire.str();
 }
@@ -409,10 +419,12 @@ void CodeGenFORFIRRTL::VisitStmt_(const Store* op) {
   stream_body << ";;======= local vars =======\n";
   LOG(INFO) << "checkpoint VisitStmt_ Store";
   Type t = op->value.type();
+  
   if (t.lanes() == 1) {
     std::string value = this->PrintExpr(op->value);
     LOG(INFO) << "GOT VALUE VisitStmt_ Store ";
     std::string ref  = this->GetWire(t,op->buffer_var.get(), stream_body);
+    
     auto arg_find = var_to_arg.find(op->buffer_var.get());
     if ( arg_find != var_to_arg.end() ) {
       const Variable* arg = arg_find->second;
@@ -437,58 +449,50 @@ void CodeGenFORFIRRTL::VisitStmt_(const Store* op) {
         << "Predicated store is not supported";
     Expr base;
     }
+    
 }
 
 void CodeGenFORFIRRTL::VisitStmt_(const For* op) {  
   stream_body << "\n";
   this->PrintIndent_body();
-  stream_body << ";;for\n";
+  stream_body << ";;======= for loop ======= \n";
   LOG(INFO) << "checkpoint VisitStmt_ For";
   //counter
   in_for = true;
-  stream_body << "\n";
   this->PrintIndent_body();
   stream_body << ";;set counter\n";
   PrintIndent_body();
-  stream_body << "wire for_start: UInt<1>\n";
-  PrintIndent_body();
-  //need to get the range of counter
-  stream_body << "reg counter: SInt<32>, clk\n";
-  PrintIndent_body();
-  stream_body << "wire count_add: SInt<32>\n";
-  PrintIndent_body();
-  stream_body << "wire count_for: SInt<32>\n";
-  stream_body << "\n";
-  PrintIndent_body();
-  stream_body << "count_add <= add(counter,SInt(1))\n";
-  PrintIndent_body();
-  stream_body << "count_for <= mux(for_start,count_add,counter)\n";
-  PrintIndent_body();
-  stream_body << "counter <= mux(reset,SInt(0),count_for)\n";
-
+  stream_body << "reg cnt: UInt<32>, clk\n";
+  // get the loop bound
   std::string extent = PrintExpr(op->extent);
   CHECK(is_zero(op->min));
   stream_body << "\n";
-  this->PrintIndent_body();
-  stream_body << ";;for loop iteration\n";
   PrintIndent_body();
-  stream_body << "wire done: UInt<1>\n";
+  stream_body << "node n1 = lt(cnt, " << extent << ")\n";
   PrintIndent_body();
-  stream_body << "wire counter_done: UInt<1>\n";
+  stream_body << "when n1 :\n";
   PrintIndent_body();
-  stream_body << "counter_done <= eq(counter,"<< extent << ")\n";
   PrintIndent_body();
-  stream_body << "done <= mux(reset, UInt(0),counter_done)\n";
+  stream_body << "cnt <= add(cnt, UInt<32>(\"h01\")\n";
   PrintIndent_body();
-  stream_body << "for_start <= and(not(counter_done),not(reset))\n";
+  PrintIndent_body();
+  stream_body << "skip\n";
+  PrintIndent_body();
+  stream_body << "else :\n";
+  PrintIndent_body();
+  PrintIndent_body();
+  stream_body << "cnt <= UInt<32>(\"h00\")\n";
+  PrintIndent_body();
+  PrintIndent_body();
+  stream_body << "skip\n";
+  stream_body << "\n";
   
   //how to get the names of the variables to be modified
   //maybe first go through the for loop body and save the arguments to be printed out
-  stream_body << "\n";
   this->PrintIndent_body();
+  /* 
   stream_body << ";;for loop body\n";
   PrintStmt(op->body); 
-  stream_body << "\n";
   this->PrintIndent_body();
   stream_body << ";;end of for loop\n";
   for ( auto x = wire_f_list.begin(); x != wire_f_list.end(); ++x ){
@@ -497,6 +501,26 @@ void CodeGenFORFIRRTL::VisitStmt_(const For* op) {
       stream_body << vid << "_f <=  mux(done," << vid << "_r," << vid << "_" << wire_f_list[x->first] << ")\n";
   in_for = false;
   }
+  */
+  // hard coded
+  stream_body << "reg b_buf: UInt<32>, clk\n";
+  PrintIndent_body();
+  stream_body << "b_buf <= b_0 \n";
+  PrintIndent_body();
+  stream_body << "when n1 : \n";
+  PrintIndent_body();
+  PrintIndent_body();
+  stream_body << "b_buf <=  b_buf + UInt<1> \n";
+  PrintIndent_body();
+  PrintIndent_body();
+  stream_body << "skip\n";
+  PrintIndent_body();
+  stream_body << "else : \n";
+  PrintIndent_body();
+  PrintIndent_body();
+  stream_body << "skip\n";
+  PrintIndent_body();
+  stream_body << "b <= b_buf\n";
 }
 
 void CodeGenFORFIRRTL::VisitStmt_(const Block *op) {
