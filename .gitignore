@@ -17,7 +17,7 @@ docs/source/samples
 docs/source/tutorials
 soda_*
 *.cpp
-*.h
+#*.h
 out
 
 # Downloaded files
