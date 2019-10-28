@@ -12,5 +12,5 @@ def for_loop(a):
 
 s = hcl.create_schedule([a], for_loop)
 print(hcl.lower(s))
-f = hcl.build(s, target='forfirrtl', name="for_addition")
+f = hcl.build(s, target='chisel', name="for_addition")
 print(f)
