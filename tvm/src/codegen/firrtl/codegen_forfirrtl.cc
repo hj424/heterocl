@@ -52,7 +52,7 @@ void CodeGenFORFIRRTL::AddFunction(LoweredFunc f,
     Var v = f->args[i];
     std::string vid = AllocVarID(v.get());
     is_input[v.get()] = true;
-    LOG(INFO) << vid;
+    LOG(INFO) << vid << "++++++++++++++++++++++++++";
   }
 
   LOG(INFO) << stream.str();
@@ -96,7 +96,7 @@ void CodeGenFORFIRRTL::AddFunction(LoweredFunc f,
       stream << "output" << arg_name.str();
       stream << "\n";
     }
-
+    LOG(INFO) << stream.str();
   }
 
   stream << "\n";

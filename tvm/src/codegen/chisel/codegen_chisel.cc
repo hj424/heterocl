@@ -2,6 +2,7 @@
  *  Copyright (c) 2017 by Contributors
  * \file codegen_chisel.cc
  */
+
 #include <tvm/build_module.h>
 #include <tvm/ir_pass.h>
 #include <vector>
@@ -37,41 +38,45 @@ void CodeGenCHISEL::AddFunction(LoweredFunc f,
   for (const auto & kv : f->handle_data_type) {
     RegisterHandleType(kv.first.get(), kv.second.type());
   }
-
-  this->stream << "circuit " << f->name << " :\n";
+  // print out package and improted libraries 
+  this->stream << "// Chisel xcel: " << f->name <<"\n";
+  this->stream << "package " << f->name << "\n\n";
+  // store function scope
   int circuit_scope = this->BeginScope();
   int circuit_scope_r = this->BeginScope_body();
-  //change line
-  this->PrintIndent();
-  this->stream << "module " << f->name << " :\n";
-  LOG(INFO) << stream.str();
+  LOG(INFO) << "check function scope";
+  this->stream << "// import chisel libraries\n";
+  this->stream << "import chisel3._\n";
+  this->stream << "import chisel3.util._\n\n";
   int module_scope = this->BeginScope();
   int module_scope_r = this->BeginScope_body();
-  //input ports
+  //input varaibles
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
     std::string vid = AllocVarID(v.get());
     is_input[v.get()] = true;
     LOG(INFO) << vid;
   }
-
+  // checkpoint: print out current stream and body IR
   LOG(INFO) << stream.str();
   LOG(INFO) << f->body;
-  
-  this->PrintIndent();
-  stream << ";;======= interface =======\n";
-  //input clock
-  this->PrintIndent();
-  stream << "input clk : Clock\n";
-  // input reset 
-  this->PrintIndent();
-  stream << "input reset: UInt<1>";
-  stream << "\n";
-  // specific input/output ports
+
+  // traverse the function body to figure out the direction of ports
+  // update unordered_map is_input
+  this->PrintStmt(f->body);
+
+  // print out the class header
+  stream << "// Main function body \n";
+  stream << "class " << f->name << " extends Module { \n";
+  this -> PrintIndent();
+  stream << "val io = IO (new Bundle { \n";
+
+  // specify && print out input/output ports
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
     std::string vid = GetVarID(v.get());
     std::ostringstream arg_name;
+    // detect input/output ports
     if (map_arg_type.find(vid) == map_arg_type.end()) {
       LOG(WARNING) << vid << " type not found\n";
       arg_name << ' ' << vid << " : ";
@@ -79,25 +84,28 @@ void CodeGenCHISEL::AddFunction(LoweredFunc f,
     }
     else {
       auto arg = map_arg_type[vid];
-      //if (v.type().is_handle())
-      //  this->stream << "*";
-      arg_name << ' ' << std::get<0>(arg) << " : ";
+      if (is_input[v.get()] == true) {
+        arg_name << "        val " << std::get<0>(arg) << " = Flipped(Decoupled(";
+      }
+      else {
+        arg_name << "        val " << std::get<0>(arg) << " = Decoupled(";
+      }
+      LOG(INFO) <<std::get<0>(arg) << ";"<< std::get<1>(arg) << "========";
       PrintType(std::get<1>(arg), arg_name);
     }
     LOG(INFO) << "PRINTING input output ports";
-    if (is_input[v.get()] == true){
-    this -> PrintIndent();
-    stream << "input" << arg_name.str();
-    stream << "\n";
+    // print out input/output ports
+    stream << arg_name.str();
+    if (is_input[v.get()] == true) {
+      stream << "))\n";
     }
-    else{
-      this -> PrintIndent();
-      stream << "output" << arg_name.str();
-      stream << "\n";
+    else {
+      stream << ")\n";
     }
+    LOG(INFO) << stream.str();
   }
   
-  stream << "\n";
+  stream << "    }\n";
   // used later
   /* 
   this->PrintIndent();
@@ -112,9 +120,7 @@ void CodeGenCHISEL::AddFunction(LoweredFunc f,
   stream << "reset <= neq(reset_1,UInt(1))\n" << "\n";
   this -> PrintIndent();
   */
-
-  // create function body
-  this->PrintStmt(f->body);
+  
   // print function body
   stream << stream_body.str();
   
@@ -195,14 +201,14 @@ void CodeGenCHISEL::PrintType(Type t, std::ostream& os) {  // NOLINT(*)
   } else if (t.is_uint()) {
     switch (t.bits()) {
       case 8: case 16: case 32: case 64: {
-        os << "UInt<" << t.bits() << ">"; return;
+        os << "UInt(" << t.bits() << ".W)"; return;
       }
       case 1: os << "SInt"; return;
     }
   } else if (t.is_int()) {
     switch (t.bits()) {
       case 8: case 16: case 32: case 64: {
-        os << "SInt<" << t.bits() << ">";  return;
+        os << "SInt(" << t.bits() << ".W)";  return;
       }
     }
   }
@@ -341,7 +347,9 @@ void CodeGenCHISEL::VisitExpr_(const Variable *op, std::ostream& os) {  // NOLIN
   if (wire_reg_auto != vid_wire_reg.end()) os << GetWire(op->type,op,os);
   else {
     os << GetVarID(op);
+    LOG(INFO) << GetVarID(op);
   }
+  LOG(INFO) << "vid_wire_reg: size" << vid_wire_reg.size() << "++++++++++!!!!!!!!!"; 
   if (in_let) var_to_arg[VARkey_to_arg] = op;
 }
 
@@ -366,6 +374,7 @@ void CodeGenCHISEL::VisitStmt_(const LetStmt* op) {
   in_let = true;
   VARkey_to_arg = op->var.get();
   std::string value = PrintExpr(op->value);
+  LOG(INFO) << value << "++++++++++++++++++++++++++++++++++";
   // Skip the argument retrieving assign statement
   auto it = var_idmap_.find(op->var.get());
   if (it == var_idmap_.end())  AllocVarID(op->var.get());
@@ -419,27 +428,32 @@ inline void PrintBinaryIntrinsitc(const Call* op,
 void CodeGenCHISEL::VisitStmt_(const Store* op) {
   stream_body << "\n";
   this->PrintIndent_body();
-  stream_body << ";;======= local vars =======\n";
   LOG(INFO) << "!!!checkpoint VisitStmt_ Store";
   Type t = op->value.type();
+  LOG(INFO) << t;
   // create a local wire and buffer  
   if (t.lanes() == 1) {
     std::string value = this->PrintExpr(op->value);
     LOG(INFO) << value;
     LOG(INFO) << "GOT VALUE VisitStmt_ Store ";
     std::string ref  = this->GetWire(t,op->buffer_var.get(), stream_body);
-    
+    LOG(INFO) << ref; 
+    // update the unordered_map - is_input
     auto arg_find = var_to_arg.find(op->buffer_var.get());
+    LOG(INFO) << GetVarID(arg_find->first);
+    LOG(INFO) << GetVarID(arg_find->second);
     if ( arg_find != var_to_arg.end() ) {
       const Variable* arg = arg_find->second;
       is_input[arg] = false;
       LOG(INFO) << op->buffer_var << "false";
     }
+    // print loop: traverse the unordered_map - var_to_arg
     for ( auto var_arg = var_to_arg.begin(); var_arg != var_to_arg.end(); ++ var_arg ){
       LOG(INFO) << "MAPPING var_to_arg: " << GetVarID(var_arg->first) << ", " << GetVarID(var_arg->second);
     }
+    // print loop: traverse the unordered_map - is_input
     for ( auto port = is_input.begin(); port != is_input.end(); ++ port ){
-      LOG(INFO) << GetVarID(port->first) << " : " << port->first << port->second;
+      LOG(INFO) << GetVarID(port->first) << " : " << port->first << "; Bool:" <<port->second;
     }
     //wire_f_list[op->buffer_var.get()] = ref;
     this->PrintIndent_body();
@@ -507,27 +521,6 @@ void CodeGenCHISEL::VisitStmt_(const For* op) {
   in_for = false;
   }
   
-  // hard coded
-  /*
-  stream_body << "reg b_buf: UInt<32>, clk\n";
-  PrintIndent_body();
-  stream_body << "b_buf <= b_0 \n";
-  PrintIndent_body();
-  stream_body << "when n1 : \n";
-  PrintIndent_body();
-  PrintIndent_body();
-  stream_body << "b_buf <=  b_buf + UInt<1> \n";
-  PrintIndent_body();
-  PrintIndent_body();
-  stream_body << "skip\n";
-  PrintIndent_body();
-  stream_body << "else : \n";
-  PrintIndent_body();
-  PrintIndent_body();
-  stream_body << "skip\n";
-  PrintIndent_body();
-  stream_body << "b <= b_buf\n";
-  */
 }
 
 void CodeGenCHISEL::VisitStmt_(const Block *op) {

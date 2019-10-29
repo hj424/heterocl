@@ -26,10 +26,7 @@ using namespace ir;
  * and OpenCL-C. You might find some odd variant features, e.g., type `int3` for
  * a vector of 3 `int`s. For native C code generator, see `CodeGenLLVM`.
  */
-class CodeGenCHISEL final : public CodeGenC { /*:
-      public ExprFunctor<void(const Expr&, std::ostream&)>,
-      public StmtFunctor<void(const Stmt&)>,
-      public CodeGenSourceBase {*/
+class CodeGenCHISEL final : public CodeGenC {
  public:
   /*!
    * \brief Initialize the code generator.
