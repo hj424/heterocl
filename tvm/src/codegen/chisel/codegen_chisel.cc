@@ -104,25 +104,145 @@ void CodeGenCHISEL::AddFunction(LoweredFunc f,
     }
     LOG(INFO) << stream.str();
   }
+  stream << "    }\n\n";
   
-  stream << "    }\n";
-  // used later
-  /* 
-  this->PrintIndent();
-  stream << ";;reset\n";
-  this->PrintIndent();
-  stream << "reg reset_1: UInt<1>,clk\n";
-  this->PrintIndent();
-  stream << "reset_1 <= UInt(1)\n";
-  this->PrintIndent();
-  stream << "wire reset: UInt<1>\n";
-  this->PrintIndent();
-  stream << "reset <= neq(reset_1,UInt(1))\n" << "\n";
-  this -> PrintIndent();
-  */
+  // print out local vars
+  std::ostringstream stream_local_vars;
+  this -> PrintIndent_stream(stream_local_vars);
+  stream_local_vars << "// local variables\n";
+  this -> PrintIndent_stream(stream_local_vars);
+  stream_local_vars << "val state = Reg(UInt(8.W))\n";
+  this -> PrintIndent_stream(stream_local_vars);
+  stream_local_vars << "val cnt = Reg(UInt(8.W))\n"; // update later: should be hinted from the IR
+  // traverse the is_input map to find the # of output ports
+  for (size_t i = 0; i < f->args.size(); ++i) {
+    Var v = f->args[i];
+    std::string vid = GetVarID(v.get());
+    auto arg = map_arg_type[vid];
+    if (is_input[v.get()] == false) {
+      this -> PrintIndent_stream(stream_local_vars);
+      stream_local_vars << "val " << std::get<0>(arg) << " = Reg(";
+      PrintType(std::get<1>(arg), stream_local_vars);
+      stream_local_vars << "))\n";
+    }
+  }
+  stream_local_vars << "\n";
+  stream << stream_local_vars.str();
+  
+  // print out fsm
+  std::ostringstream stream_fsm;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "// FSM\n";
+  this -> PrintIndent_stream(stream_fsm);
+  // idle
+  stream_fsm << "when (state === 0.U) {\n";
+  indent_current += 2;
+  for ( size_t i = 0; i < f->args.size(); ++i ){
+    Var v = f->args[i];
+    std::string vid = GetVarID(v.get());
+    auto arg = map_arg_type[vid];
+    this -> Print_init_valrdy(stream_fsm, std::get<0>(arg), is_input[v.get()]);
+  }
+  this -> PrintIndent_stream(stream_fsm);
+ // create when statement with multiple valrdy signals
+  bool later_iter = false;
+  stream_fsm << "when (";
+  for ( size_t i = 0; i < f->args.size(); ++i ){
+    Var v = f->args[i];
+    std::string vid = GetVarID(v.get());
+    auto arg = map_arg_type[vid];
+    if (is_input[v.get()]) {
+      if (later_iter) {
+        stream_fsm << " || ";
+      }
+      later_iter = true;
+      stream_fsm << std::get<0>(arg) << ".valid";
+    }
+  }
+  stream_fsm << ") {\n";
+  indent_current += 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "state := 1.U\n";
+  indent_current -= 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "}\n";
+  // reset
+  indent_current -= 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "}.elsewhen (state === 1.U) {\n";
+  indent_current += 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "state := 2.U\n";
+  this -> PrintIndent_stream(stream_fsm); // update later: detect init values in IR level
+  stream_fsm << "b := io.a.bits\n";       // update later: hard coded now
+  indent_current -= 2;
+  this -> PrintIndent_stream(stream_fsm);
+  // compute
+  stream_fsm << "}.otherwise{\n";
+  indent_current += 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "when (cnt === 5.U) {\n";  // update later: should be info from IR
+  indent_current += 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "io.";
+  for ( size_t i = 0; i < f->args.size(); ++i ){
+    Var v = f->args[i];
+    std::string vid = GetVarID(v.get());
+    auto arg = map_arg_type[vid];
+    if (is_input[v.get()] == false) {
+      stream_fsm << std::get<0>(arg) << ".valid := true.B\n";
+    }
+  }
+  indent_current -= 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "}.otherwise {\n";
+  indent_current += 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "io.";
+  for ( size_t i = 0; i < f->args.size(); ++i ){
+    Var v = f->args[i];
+    std::string vid = GetVarID(v.get());
+    auto arg = map_arg_type[vid];
+    if (is_input[v.get()] == false) {
+      stream_fsm << std::get<0>(arg) << ".valid := false.B\n";
+    }
+  }
+  indent_current -= 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "}\n";
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "when (";
+  later_iter = false;
+  for ( size_t i = 0; i < f->args.size(); ++i ){
+    Var v = f->args[i];
+    std::string vid = GetVarID(v.get());
+    auto arg = map_arg_type[vid];
+    if (is_input[v.get()] == false) {
+      if (later_iter) {
+        stream_fsm << " && ";
+      }
+      later_iter = true;
+      stream_fsm << std::get<0>(arg) << ".ready";
+    }
+  }
+  stream_fsm << ") {\n";
+  indent_current += 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "state := 0.U\n";
+  indent_current -= 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "}\n";
+  
+  // enclose "}"
+  indent_current -= 2;
+  this -> PrintIndent_stream(stream_fsm);
+  stream_fsm << "}\n";
+  
+  stream << stream_fsm.str(); 
   
   // print function body
   stream << stream_body.str();
+  stream << "}\n";
   
   //deal with the final connections of registers
   this->EndScope(module_scope);
@@ -150,6 +270,27 @@ void CodeGenCHISEL::PrintSSAAssign(
   }
   stream << ";\n";
 }*/
+
+// print out the valrdy signal for init state
+void CodeGenCHISEL::Print_init_valrdy(std::ostream& os, std::string var, bool is_input) {
+  LOG(INFO) << "Print_init_valrdy";
+  this -> PrintIndent_stream(os);
+  if (is_input) {
+    os << "io." << var << ".ready := true.B\n";
+  }
+  else {
+    os << "io." << var << ".valid := false.B\n";
+  }
+}
+
+// helper function: print indent
+void CodeGenCHISEL::PrintIndent_stream(std::ostream& os) {
+  LOG(INFO) << "PrintIndent_stream";
+  for (int i = 0; i < indent_current; ++i) {
+    os << ' ';
+  }
+}
+
 
 void CodeGenCHISEL::PrintIndent_body() {
   LOG(INFO) << "PrintIndent_body";
@@ -431,6 +572,7 @@ void CodeGenCHISEL::VisitStmt_(const Store* op) {
   LOG(INFO) << "!!!checkpoint VisitStmt_ Store";
   Type t = op->value.type();
   LOG(INFO) << t;
+  
   // create a local wire and buffer  
   if (t.lanes() == 1) {
     std::string value = this->PrintExpr(op->value);
@@ -456,64 +598,71 @@ void CodeGenCHISEL::VisitStmt_(const Store* op) {
       LOG(INFO) << GetVarID(port->first) << " : " << port->first << "; Bool:" <<port->second;
     }
     //wire_f_list[op->buffer_var.get()] = ref;
+    /*
     this->PrintIndent_body();
     stream_body << "wire " << ref << " : ";
     this -> PrintType(t,stream_body);
     stream_body << "\n";
     this -> PrintIndent_body();
     stream_body << ref << " <= " << value << "\n";
-  } else {
+    */
+  } 
+  else {
     CHECK(is_one(op->predicate))
         << "Predicated store is not supported";
     Expr base;
-    }
+  }
+  
+  // hard coded for this example, updated later for general cases
+  // Hardware IRs are required
+  if (!in_for) {
+
+  }
   LOG(INFO) << "!!!!!!!!!!!!!!!!!!!!!!end!!!!!!!!!!!!!!!!!!";
     
 }
 
 void CodeGenCHISEL::VisitStmt_(const For* op) {  
-  stream_body << "\n";
-  this->PrintIndent_body();
-  stream_body << ";;======= for loop ======= \n";
-  LOG(INFO) << "checkpoint VisitStmt_ For";
   //counter
   in_for = true;
-  this->PrintIndent_body();
-  stream_body << ";;set counter\n";
-  PrintIndent_body();
-  stream_body << "reg cnt: UInt<32>, clk\n";
-  // get the loop bound
-  std::string extent = PrintExpr(op->extent);
+  stream_body << "// data path \n";
+  LOG(INFO) << "checkpoint VisitStmt_ For";
+  // get the loop bound -> update later: find a way to pass to control logic
+  //std::string extent = PrintExpr(op->extent);
   CHECK(is_zero(op->min));
-  stream_body << "\n";
   PrintIndent_body();
-  stream_body << "node n1 = lt(cnt, " << extent << ")\n";
-  PrintIndent_body();
-  stream_body << "when n1 :\n";
+  stream_body << "when ((cnt < 5.U) && (io.a.valid)) {\n";
   PrintIndent_body();
   PrintIndent_body();
-  stream_body << "cnt <= add(cnt, UInt<32>(\"h01\")\n";
+  stream_body << "b := b + 1.U\n";
   PrintIndent_body();
   PrintIndent_body();
-  stream_body << "skip\n";
+  stream_body << "cnt := cnt + 1.U\n";
   PrintIndent_body();
-  stream_body << "else :\n";
-  PrintIndent_body();
-  PrintIndent_body();
-  stream_body << "cnt <= UInt<32>(\"h00\")\n";
+  stream_body << "}.otherwise { \n";
   PrintIndent_body();
   PrintIndent_body();
-  stream_body << "skip\n";
-  stream_body << "\n";
+  stream_body << "cnt := cnt + 1.U\n";
+  PrintIndent_body();
+  stream_body << "}\n";
+  PrintIndent_body();
+  stream_body << "io.b.bits := b\n";
   
   //how to get the names of the variables to be modified
   //maybe first go through the for loop body and save the arguments to be printed out
   this->PrintIndent_body();
    
-  stream_body << ";;for loop body\n";
-  PrintStmt(op->body); 
-  this->PrintIndent_body();
-  stream_body << ";;end of for loop\n";
+  //PrintStmt(op->body); 
+  //this->PrintIndent_body();
+  stream_body << "// code ends here\n";
+  // print loop: traverse the unordered_map - wire_f_list
+  for ( auto wire_list = wire_f_list.begin(); wire_list != wire_f_list.end(); ++ wire_list ){
+    LOG(INFO) << "===========wire_f_list:" << GetVarID(wire_list->first) << ";" << wire_list->second;
+  }
+  // print loop: traverse the unordered_map - vid_wire_reg
+  for ( auto wire_reg = vid_wire_reg.begin(); wire_reg != vid_wire_reg.end(); ++ wire_reg ){
+    LOG(INFO) << "===========vid_wire_reg:" << GetVarID(wire_reg->first) << ";" << wire_reg->second;
+  }
   for ( auto x = wire_f_list.begin(); x != wire_f_list.end(); ++x ){
       std::string vid = GetVarID(x->first);
       PrintIndent_body();

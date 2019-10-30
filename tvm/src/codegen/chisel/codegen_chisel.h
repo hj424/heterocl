@@ -45,9 +45,14 @@ class CodeGenCHISEL final : public CodeGenC {
   std::string Finish();
 
   /*! \brief print the current indented value */
+  void PrintIndent_stream(std::ostream& os);
   void PrintIndent_body();
   int BeginScope_body();
   void EndScope_body(int scope_id);
+
+  /*! \brief print the valrdy signal for init state*/
+  void Print_init_valrdy(std::ostream& os, std::string var, bool is_input);
+
 
   /*!
    * \brief Print the expression n(or its ssa id if in ssa mode) into os
@@ -152,6 +157,8 @@ class CodeGenCHISEL final : public CodeGenC {
   std::ostringstream stream_body;
   /*! \brief The current indentation value of stream_print */
   int indent_body{0};
+
+  int indent_current{4};
   std::vector<bool> scope_mark_body;
   bool in_for{false};
   /*! \brief whether to print in SSA form */
